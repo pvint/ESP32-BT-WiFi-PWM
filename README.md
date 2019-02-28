@@ -5,7 +5,7 @@ This can receive JSON data over Bluetooth or HTTP GET request (using simple buil
 
 Example Bluetooth request to adjust Channel 0 to 2000:
 ```
- *      {
+{
         "ch": "0",
         "dc": "2000"
 }
