@@ -14,3 +14,5 @@ Example Bluetooth request to adjust Channel 0 to 2000:
 Example HTTP GET request for the same settings:
 `http://192.168.1.79/?ch=0&dc=1000`
 
+## Dependencies
+ArduinoJson https://github.com/bblanchon/ArduinoJson
