@@ -1,9 +1,11 @@
 #include <WiFi.h>
 #include "BluetoothSerial.h"
 #include <ArduinoJson.h>
-#include <nvs.h>
-#include <nvs_flash.h>
+//#include <nvs.h>
+//#include <nvs_flash.h>
 #include <Preferences.h>
+#include "fauxmoESP.h"
+#include "esp_err.h"
 #include "index_html.h"
 
 #define JSON_BUFFER_SIZE 240
@@ -12,11 +14,12 @@ char ssid[32];
 char pwd[32];
 
 int wifiTimeout = 20;
-WiFiServer server(80);
+WiFiServer server(8080);
 bool wifiConnected = false;
 bool hasCredentials = false;
 bool connStatusChanged = false;
 
+fauxmoESP fauxmo;
 
 // VintLabs Module PWM GPIO Assignments
 #define PWM0 12
@@ -33,30 +36,20 @@ int freq = 5000;
 byte ledChannel = 0;
 int ledValue[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 byte resolution = 12;
+byte ledDelay = 1;
 
 byte channel;
 int onTime;
 
 BluetoothSerial SerialBT;
-char bluetoothName[32] = "VintLabs Controller";
+char bluetoothName[32] = "VintLabs Starfish";
 
 
 byte debugLevel = 5;
 
-void serialOutput(char *text, byte debug)
-{
-	if (debugLevel < debug)
-		return;
-
-	Serial.print(text);
-}
-
-
 void connectWifi()
 {
-	serialOutput("Connecting to ", 1);
-	serialOutput(ssid, 1);
-	serialOutput("\n", 1);
+	Serial.printf("Connecting to %s...\n", ssid);
 
 	WiFi.disconnect();
 
@@ -66,26 +59,21 @@ void connectWifi()
 	while (WiFi.status() != WL_CONNECTED)
 	{
 		delay(250);
-		serialOutput(".", 1);
+		Serial.print(".");
 		i++;
 		if ( i / 4 > wifiTimeout )
 		{
-			serialOutput("Timeout connecting to ", 1);
-			serialOutput(ssid, 1);
-			serialOutput("\n", 1);
+			Serial.printf("Timeout connecting to %s\n", ssid);
 			return;
 		}
 	}
 
-	serialOutput("\nConnected to ", 1);
-	serialOutput(ssid, 1);
-	serialOutput(" IP: ", 1);
-	serialOutput((char*)WiFi.localIP().toString().c_str(), 1);
-	serialOutput("\n", 1);
+	Serial.printf("\nConnected to %s  IP: %s\n", ssid, WiFi.localIP().toString().c_str());
 
 	// start the web server
 	server.begin();
 
+	wifiConnected = true;
 	return;
 } // connectWifi()
 
@@ -111,9 +99,7 @@ void decodeJson(JsonObject &json)
                         prefs.putBool("valid", true);
                         prefs.end();
 
-                        serialOutput("Rx over BT: SSID = ", 2);
-                        serialOutput(ssid, 2);
-			serialOutput("\n", 2);
+			Serial.printf("Rx ssid over BT: \"%s\"\n", ssid);
 
                         connStatusChanged = true;
                         hasCredentials = true;
@@ -121,19 +107,49 @@ void decodeJson(JsonObject &json)
         } // if jsonIn.success
 }
 
+void fadeLed(byte led, unsigned char value)
+{
+	int val = value * 16;
+	int s = ledcRead(led);
 
+	if (s == val)
+		return;
+
+	byte step;
+
+	if (val > s)
+		step = 1;
+	else
+		step = -1;
+
+	//Serial.printf("Was %d, set to %d, step %d\n", s, val, step);
+	for (int v = s; v != val; v += step)
+	{
+		ledcWrite(led, v);
+		delay(ledDelay);
+		//Serial.println(v);
+	}
+
+	ledcWrite(led, val);
+} // fadeLed()
 
 void setup()
 {
 	Serial.begin(115200);
-	SerialBT.begin(bluetoothName);
+
+	// Get MAC
+	uint8_t mac[6];
+	esp_efuse_mac_get_default(mac);
+
+	Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+	String bname = String(bluetoothName) + String("-") + String(mac[5],HEX);
+	SerialBT.begin(bname);
 
 	// Set timeout for readBytesUntil etc (default is 1000ms)
 	SerialBT.setTimeout(250);
 
-	serialOutput("Bluetooth started, connect to \"", 1);
-	serialOutput(bluetoothName, 1);
-	serialOutput("\"\n",1);
+	Serial.printf("Bluetooth started. Connect to %s\n", bname.c_str());
 
 	Preferences prefs;
 	prefs.begin("WiFiCred", false);
@@ -143,13 +159,13 @@ void setup()
 		strcpy(ssid, prefs.getString("ssid","").c_str());
 		strcpy(pwd, prefs.getString("pwd", "").c_str());
 
-		serialOutput("Found SSID from saved preferences: ", 1);
-		serialOutput(ssid, 1);
-		serialOutput("\n", 1);
+		Serial.printf("Found SSID from saved preferences: \"%s\"\n", ssid);
+		//Serial.printf("Found pass from saved preferences: \"%s\"\n", pwd);
 
 		hasCredentials = true;
 	} // if prefs valid
-
+strcpy(ssid,"RFBM2");
+strcpy(pwd, "marchalfranck");
 	if (hasCredentials)
 		connectWifi();
 
@@ -160,7 +176,7 @@ void setup()
 	}
 
 	// attach channels to pins
-	        ledcAttachPin(PWM0, 0);
+	ledcAttachPin(PWM0, 0);
         ledcAttachPin(PWM1, 1);
         ledcAttachPin(PWM2, 2);
         ledcAttachPin(PWM3, 3);
@@ -179,21 +195,83 @@ void setup()
         pinMode(PWM7, OUTPUT);
 
 
+	// Temp setup for fauxmoESP
+	Serial.println("Setting up fauxmo stuff");
+	fauxmo.createServer(true);
+	fauxmo.setPort(80);	// required for gen3 devices apparently??
+	if (wifiConnected)
+	{
+		Serial.println("Enabling fauxmo");
+		fauxmo.enable(true);
+	}
+	fauxmo.addDevice("Starfish");
+
+	fauxmo.onSetState([](unsigned char device_id, const char *device_name, bool state, unsigned char val)
+	{
+		//fadeLed(0, value);
+		int value = val << 4;
+		int led = 0;	
+		int s = ledcRead(led);
+
+		if (s == value)
+			return;
+
+		byte step;
+
+		if (value > s)
+			step = 1;
+		else
+			step = -1;
+
+		//Serial.printf("Was %d, set to %d, step %d\n", s, val, step);
+		for (int v = s; v != value; v += step)
+		{
+			ledcWrite(led, v);
+			delay(ledDelay);
+			//Serial.println(v);
+		}
+
+		ledcWrite(led, value);
+
+	});
+
+	// callback for getBinaryState
+	/*
+	fauxmo.onGetState([](unsigned char device_id, const char *device_name) {
+		return !digitalRead(2);
+	});*/
 	
 } // setup()
 
 void loop()
 {
-	serialOutput("Entering main loop\n", 2);
-
 	// Poll for BT or WiFi requests
 	while (1)
 	{
 		// check if WiFi connection status is to be changed
 		if (connStatusChanged)
 		{
+			wifiConnected = false;
 			connectWifi();
 			connStatusChanged = false;
+			if (wifiConnected)
+			{
+				Serial.println("(Re)enabling fauxmo");
+				fauxmo.enable(true);
+			}
+
+		}
+
+		// fauxmo stuff
+		if (wifiConnected)
+		{
+			//Serial.printf("[BEFOREHANDLE] Free heap: %d bytes\n", ESP.getFreeHeap());
+			fauxmo.handle();
+			//Serial.printf("[AFTERHANDLE] Free heap: %d bytes\n", ESP.getFreeHeap());
+
+    // If your device state is changed by any other means (MQTT, physical button,...)
+    // you can instruct the library to report the new state to Alexa on next request:
+    // fauxmo.setState(ID_YELLOW, true, 255);
 		}
 
 		// Check for incoming Bluetooth data
