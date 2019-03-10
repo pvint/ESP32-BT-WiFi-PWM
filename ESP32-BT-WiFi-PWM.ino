@@ -44,8 +44,8 @@ int onTime;
 BluetoothSerial SerialBT;
 char bluetoothName[32] = "VintLabs Starfish";
 
-
 byte debugLevel = 5;
+
 
 void connectWifi()
 {
@@ -164,8 +164,7 @@ void setup()
 
 		hasCredentials = true;
 	} // if prefs valid
-strcpy(ssid,"RFBM2");
-strcpy(pwd, "marchalfranck");
+
 	if (hasCredentials)
 		connectWifi();
 
@@ -204,14 +203,25 @@ strcpy(pwd, "marchalfranck");
 		Serial.println("Enabling fauxmo");
 		fauxmo.enable(true);
 	}
-	fauxmo.addDevice("Starfish");
+
+	//fauxmo.addDevice("Starfish");
+	char d[12];
+
+	for (int i = 0; i < 8; i++)
+	{
+		sprintf(d, "Starfish %c", i + 49);
+		fauxmo.addDevice(d);
+	}
 
 	fauxmo.onSetState([](unsigned char device_id, const char *device_name, bool state, unsigned char val)
 	{
+		//ledc_set_fade_with_time(LEDC_HS_MODE, device_id, val << 4, 2000);
+		//ledc_fade_start(LEDC_HS_MODE, device_id, LEDC_FADE_NO_WAIT);
 		//fadeLed(0, value);
+		//Serial.printf("device_id = %d\n", device_id);
 		int value = val << 4;
-		int led = 0;	
-		int s = ledcRead(led);
+		int led = device_id;	
+/*		int s = ledcRead(led);
 
 		if (s == value)
 			return;
@@ -223,14 +233,14 @@ strcpy(pwd, "marchalfranck");
 		else
 			step = -1;
 
-		//Serial.printf("Was %d, set to %d, step %d\n", s, val, step);
+		//Serial.printf("Was %d, set %d to %d, step %d\n", s, led, value, step);
 		for (int v = s; v != value; v += step)
 		{
 			ledcWrite(led, v);
 			delay(ledDelay);
-			//Serial.println(v);
+			Serial.println(v);
 		}
-
+*/
 		ledcWrite(led, value);
 
 	});
@@ -248,6 +258,7 @@ void loop()
 	// Poll for BT or WiFi requests
 	while (1)
 	{
+		//Serial.print("x");
 		// check if WiFi connection status is to be changed
 		if (connStatusChanged)
 		{
